@@ -24,15 +24,17 @@ def parse_file(filename: str, raw: bytes) -> list[tuple[str, int | None]]:
         raise HTTPException(422, "文件解析失败，请确认文件未损坏") from exc
     raise HTTPException(415, "仅支持 PDF 和 TXT 文件")
 
-async def ingest_upload(file: UploadFile, store: VectorStore, max_upload_mb: int) -> dict:
+async def ingest_upload(file: UploadFile, store: VectorStore, max_upload_mb: int,
+                        chunk_size: int = 500, chunk_overlap: int = 50) -> dict:
     filename = Path(file.filename or "upload").name
     raw = await file.read(max_upload_mb * 1024 * 1024 + 1)
     if not raw:
         raise HTTPException(400, "上传文件为空")
     if len(raw) > max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"文件超过 {max_upload_mb} MB 限制")
-    document_id = hashlib.sha256(raw).hexdigest()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50, add_start_index=True)
+    document_id = hashlib.sha256(filename.encode("utf-8") + b"\0" + raw).hexdigest()
+    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+        add_start_index=True, strip_whitespace=True)
     chunks = []
     for page_text, page in parse_file(filename, raw):
         for index, doc in enumerate(splitter.create_documents([page_text])):

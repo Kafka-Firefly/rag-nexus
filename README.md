@@ -30,12 +30,17 @@ outputs/
 ├── README.md
 ├── backend/
 │   ├── requirements.txt
+│   ├── requirements-eval.txt
 │   ├── main.py
 │   ├── ingest.py
 │   ├── retriever.py
-│   └── vector_store.py
+│   ├── vector_store.py
+│   └── evaluate.py
 └── frontend/
     ├── package.json
+    ├── tsconfig.json
+    ├── next.config.ts
+    ├── postcss.config.mjs
     └── app/
         ├── page.tsx
         ├── layout.tsx
@@ -78,9 +83,22 @@ outputs/
 ## API 与 SSE 协议
 
 - `POST /upload`：multipart 表单字段 `file`，允许 `.pdf` / `.txt`，返回文档 ID、来源名和 chunk 数。
+- `GET /documents`：查看知识库文件清单；`DELETE /documents/{document_id}`：删除文档及其索引块。
 - `POST /chat`：JSON `{ "question": "..." }`。SSE 的 `citations` 事件携带 `source`、`chunk_id`、页码和原文；默认 `message` 事件中每条 `data` 为 `{ "token": "..." }`；结束时发 `done`，生成期间失败则发 `error`。
 - `GET /health`：服务状态。
 
 ## 生产化说明
 
-该工程提供可运行的本地基线。正式部署时还应按场景接入身份认证、租户隔离、速率限制、反向代理 TLS、审计/删除接口、对象存储、索引增量更新、BM25 持久化与离线标注评测。当前 BM25 索引按请求从 Qdrant payload 构建，适合本地知识库原型及中小数据集；大规模语料应改为持久化关键词索引。Reranker 分数用于排序，不应被当作校准置信概率。
+BM25 索引在服务启动时加载到内存，并在文档上传或删除后刷新；大规模语料应使用持久化、可增量更新的关键词索引。Reranker 分数用于排序，不应被当作校准置信概率。此本地示例未启用用户认证或租户隔离；部署到公共网络前必须放在受保护的网关后，并设置 TLS、认证、限流和数据隔离。
+
+## 文档管理与评估
+
+- `GET /documents` 列出已索引文档；`DELETE /documents/{document_id}` 删除该文档及其所有块。
+- 评估集使用 UTF-8 JSONL，每行形如 `{"question":"根据你的资料填写问题","reference":"由领域人员编写的参考答案"}`。请使用真实文档和人工审核的参考答案，不要将占位内容作为评估数据。
+- 在后端虚拟环境安装评估依赖：`pip install -r requirements-eval.txt`。确保服务运行且环境变量可用后执行：
+
+  ```bash
+  python evaluate.py --input evaluation.jsonl --output evaluation-results.json
+  ```
+
+  脚本通过实际 `/chat` 接口评估 Ragas Faithfulness、Answer Relevancy、Context Precision 与 Context Recall。评估会调用配置的 LLM 和 embedding API，产生额外耗时及费用；不同评审模型的分数可能有波动。仓库未提供虚构的评估对比数据。
